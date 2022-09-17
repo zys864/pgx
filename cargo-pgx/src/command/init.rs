@@ -16,7 +16,6 @@ use pgx_utils::{
     prefix_path, SUPPORTED_MAJOR_VERSIONS,
 };
 use rayon::prelude::*;
-use rttp_client::{types::Proxy, HttpClient};
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -188,24 +187,29 @@ fn download_postgres(pg_config: &PgConfig, pgx_home: &PathBuf) -> eyre::Result<P
     );
     let url = pg_config.url().expect("no url for pg_config").as_str();
     tracing::debug!(url = %url, "Fetching");
-    let mut http_client = HttpClient::new();
-    http_client.get().url(url);
+    let mut http_client_builder = reqwest::blocking::ClientBuilder::new();
     if let Some((host, port)) =
         env_proxy::for_url_str(pg_config.url().expect("no url for pg_config")).host_port()
     {
-        http_client.proxy(Proxy::https(host, port as u32));
+        http_client_builder =
+            http_client_builder.proxy(reqwest::Proxy::http(format!("{host}:{port}"))?);
+    } else {
+        http_client_builder = http_client_builder.no_proxy();
     }
-    let http_response = http_client.emit()?;
-    tracing::trace!(status_code = %http_response.code(), url = %url, "Fetched");
-    if http_response.code() != 200 {
+    let mut http_response = http_client_builder.build()?.get(url).send()?;
+    tracing::trace!(status_code = %http_response.status(), url = %url, "Fetched");
+    if http_response.status() != 200 {
         return Err(eyre!(
             "Problem downloading {}:\ncode={}\n{}",
             pg_config.url().unwrap().to_string().yellow().bold(),
-            http_response.code(),
-            http_response.body().to_string()
+            http_response.status(),
+            http_response.text()?
         ));
     }
-    let pgdir = untar(http_response.body().binary(), pgx_home, pg_config)?;
+    let mut buf =
+        Vec::with_capacity(http_response.content_length().unwrap_or(20 * 1024 * 1024) as usize);
+    http_response.copy_to(&mut buf)?;
+    let pgdir = untar(&buf, pgx_home, pg_config)?;
     configure_postgres(pg_config, &pgdir)?;
     make_postgres(pg_config, &pgdir)?;
     make_install_postgres(pg_config, &pgdir) // returns a new PgConfig object

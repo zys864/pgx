@@ -28,7 +28,7 @@ proc-macro2 = { version = "1.0.39", features = [ "span-locations" ] }
 quote = "1.0.18"
 rayon = "1.5.3"
 regex = "1.5.5"
-rttp_client = { version = "0.1.0", features = ["tls-native"] }
+reqwest = { version = "0.11.11", features = [ "blocking" ] }
 syn = { version = "1.0.95", features = [ "extra-traits", "full", "fold", "parsing" ] }
 unescape = "0.1.0"
 fork = "0.1.19"

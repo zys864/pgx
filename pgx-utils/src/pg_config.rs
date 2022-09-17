@@ -414,7 +414,6 @@ mod rss {
     use crate::pg_config::PgVersion;
     use eyre::WrapErr;
     use owo_colors::OwoColorize;
-    use rttp_client::{types::Proxy, HttpClient};
     use serde_derive::Deserialize;
     use url::Url;
 
@@ -424,17 +423,19 @@ mod rss {
         pub(super) fn new(supported_major_versions: &[u16]) -> eyre::Result<Vec<PgVersion>> {
             static VERSIONS_RSS_URL: &str = "https://www.postgresql.org/versions.rss";
 
-            let mut http_client = HttpClient::new();
-            http_client.get().url(VERSIONS_RSS_URL);
+            let mut http_client_builder = reqwest::blocking::ClientBuilder::new();
             if let Some((host, port)) = env_proxy::for_url_str(VERSIONS_RSS_URL).host_port() {
-                http_client.proxy(Proxy::https(host, port as u32));
+                http_client_builder = http_client_builder.proxy(reqwest::Proxy::http(format!("{host}:{port}"))?);
+            }else{
+                http_client_builder = http_client_builder.no_proxy();
             }
 
-            let response = http_client
-                .emit()
+            let response = http_client_builder.build()?
+                .get(VERSIONS_RSS_URL)
+                .send()
                 .wrap_err_with(|| format!("unable to retrieve {}", VERSIONS_RSS_URL))?;
 
-            let rss: Rss = match serde_xml_rs::from_str(&response.body().to_string()) {
+            let rss: Rss = match serde_xml_rs::from_str(&response.text()?) {
                 Ok(rss) => rss,
                 Err(e) => return Err(e.into()),
             };
